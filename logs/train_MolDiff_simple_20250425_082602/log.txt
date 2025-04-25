@@ -1,0 +1,14 @@
+[2025-04-25 08:26:06,185::train::INFO] Namespace(config='configs/train_MolDiff_simple.yml', device='cpu', logdir='logs')
+[2025-04-25 08:26:06,185::train::INFO] {'model': {'name': 'diffusion', 'node_dim': 256, 'edge_dim': 64, 'denoiser': {'backbone': 'NodeEdgeNet', 'num_blocks': 6, 'cutoff': 15, 'use_gate': True}, 'diff': {'num_timesteps': 1000, 'time_dim': 10, 'categorical_space': 'discrete', 'diff_pos': {'beta_schedule': 'advance', 'scale_start': 0.9999, 'scale_end': 0.0001, 'width': 3}, 'diff_atom': {'init_prob': 'tomask', 'beta_schedule': 'advance', 'scale_start': 0.9999, 'scale_end': 0.0001, 'width': 3}, 'diff_bond': {'init_prob': 'absorb', 'beta_schedule': 'advance', 'scale_start': 0.9999, 'scale_end': 0.0001, 'width': 3}}}, 'train': {'seed': 2023, 'batch_size': 32, 'num_workers': 0, 'pin_memory': True, 'max_iters': 100, 'val_freq': 1000, 'pos_noise_std': 0.05, 'max_grad_norm': 50.0, 'use_amp': False, 'optimizer': {'type': 'adamw', 'lr': 0.0001, 'weight_decay': 1e-08, 'beta1': 0.99, 'beta2': 0.999}, 'scheduler': {'type': 'plateau', 'factor': 0.8, 'patience': 1000, 'min_lr': 1e-05}}, 'transform': {'use_mask_node': True, 'use_mask_edge': True}, 'dataset': {'name': 'drug3d', 'root': './data/geom_drug', 'path_dict': {'sdf': 'sdf', 'summary': 'mol_summary.csv', 'processed': 'processed.lmdb'}, 'split': 'split_by_molid.pt'}, 'chem': {'atomic_numbers': [6, 7, 8, 9, 15, 16, 17], 'mol_bond_types': [1, 2, 3, 4]}}
+[2025-04-25 08:26:06,185::train::INFO] Loading dataset...
+[2025-04-25 08:26:06,521::train::INFO] Building model...
+[2025-04-25 08:26:09,195::train::INFO] [Train] Iter 1 | loss: 3.762659 | loss_pos: 3.404798 | loss_node: 0.197256 | loss_edge: 0.160606
+[2025-04-25 08:26:10,999::train::INFO] [Train] Iter 2 | loss: 7.772543 | loss_pos: 7.431921 | loss_node: 0.190049 | loss_edge: 0.150574
+[2025-04-25 08:26:12,738::train::INFO] [Train] Iter 3 | loss: 2.760219 | loss_pos: 2.344398 | loss_node: 0.234726 | loss_edge: 0.181094
+[2025-04-25 08:26:14,759::train::INFO] [Train] Iter 4 | loss: 2.466437 | loss_pos: 2.121766 | loss_node: 0.193294 | loss_edge: 0.151377
+[2025-04-25 08:26:16,971::train::INFO] [Train] Iter 5 | loss: 1.753759 | loss_pos: 1.381312 | loss_node: 0.223032 | loss_edge: 0.149416
+[2025-04-25 08:26:18,841::train::INFO] [Train] Iter 6 | loss: 2.005728 | loss_pos: 1.727812 | loss_node: 0.163740 | loss_edge: 0.114177
+[2025-04-25 08:26:20,856::train::INFO] [Train] Iter 7 | loss: 1.738194 | loss_pos: 1.400249 | loss_node: 0.196085 | loss_edge: 0.141860
+[2025-04-25 08:26:22,890::train::INFO] [Train] Iter 8 | loss: 1.693099 | loss_pos: 1.436190 | loss_node: 0.143821 | loss_edge: 0.113087
+[2025-04-25 08:26:24,910::train::INFO] [Train] Iter 9 | loss: 1.804622 | loss_pos: 1.557555 | loss_node: 0.152509 | loss_edge: 0.094559
+[2025-04-25 08:26:25,330::train::INFO] Terminating...
