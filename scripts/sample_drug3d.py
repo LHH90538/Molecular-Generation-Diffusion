@@ -6,12 +6,14 @@ sys.path.append('.')
 
 import torch
 import numpy as np
-import torch.utils.tensorboard
 from easydict import EasyDict
 from rdkit import Chem
 
+# 在导入其他模块前添加安全全局变量
+import torch.serialization
+torch.serialization.add_safe_globals([EasyDict])
+
 from models.model import MolDiff
-# from models.bond_predictor import BondPredictor
 from utils.sample import seperate_outputs
 from utils.transforms import *
 from utils.misc import *
@@ -22,7 +24,6 @@ def print_pool_status(pool, logger):
         len(pool.finished), len(pool.failed)
     ))
 
-
 def data_exists(data, prevs):
     for other in prevs:
         if len(data.logp_history) == len(other.logp_history):
@@ -32,6 +33,24 @@ def data_exists(data, prevs):
                 return True
     return False
 
+def safe_load_checkpoint(checkpoint_path, device, logger):
+    """安全加载检查点的封装函数"""
+    try:
+        # 先尝试默认weights_only模式
+        logger.info(f"Attempting standard checkpoint loading...")
+        return torch.load(checkpoint_path, map_location=device)
+    except Exception as e:
+        logger.warning(f"Standard loading failed: {str(e)}")
+        logger.info("Attempting with explicit safe globals...")
+        try:
+            # 显式添加安全全局变量后重试
+            torch.serialization.add_safe_globals([EasyDict])
+            return torch.load(checkpoint_path, map_location=device)
+        except Exception as e:
+            logger.warning(f"Safe loading failed: {str(e)}")
+            logger.warning("Falling back to weights_only=False (USE WITH CAUTION!)")
+            # 最后回退到非安全模式
+            return torch.load(checkpoint_path, map_location=device, weights_only=False)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -39,157 +58,181 @@ if __name__ == '__main__':
     parser.add_argument('--outdir', type=str, default='./outputs')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument('--batch_size', type=int, default=12)
-    args = parser.parse_args()
+    
+    # 处理Jupyter可能传入的额外参数
+    args, _ = parser.parse_known_args()
 
-    # # Load configs
+    # 首先初始化日志系统
+    log_root = args.outdir.replace('outputs', 'outputs_vscode') if sys.argv[0].startswith('/data') else args.outdir
+    log_dir = get_new_log_dir(log_root, prefix='sample')
+    logger = get_logger('sample', log_dir)
+    
+    # Load configs
+    logger.info("Loading configuration...")
     config = load_config(args.config)
     config_name = os.path.basename(args.config)[:os.path.basename(args.config).rfind('.')]
-    seed_all(config.sample.seed + np.sum([ord(s) for s in args.outdir]))
-    # load ckpt and train config
-    ckpt = torch.load(config.model.checkpoint, map_location=args.device)
+    
+    # 修复种子类型问题
+    seed = int(config.sample.seed) + int(np.sum([ord(s) for s in args.outdir]))
+    seed_all(seed)
+    logger.info(f"Using random seed: {seed}")
+    
+    # 安全加载检查点
+    logger.info(f"Loading checkpoint from {config.model.checkpoint}")
+    ckpt = safe_load_checkpoint(config.model.checkpoint, args.device, logger)
     train_config = ckpt['config']
 
-    # # Logging
-    log_root = args.outdir.replace('outputs', 'outputs_vscode') if sys.argv[0].startswith('/data') else args.outdir
-    log_dir = get_new_log_dir(log_root, prefix=config_name)
-    logger = get_logger('sample', log_dir)
-    writer = torch.utils.tensorboard.SummaryWriter(log_dir)
+    # 记录配置信息
+    logger.info("Program arguments:")
     logger.info(args)
+    logger.info("Configuration:")
     logger.info(config)
     shutil.copyfile(args.config, os.path.join(log_dir, os.path.basename(args.config)))
 
-    # # Transform
+    # Transform
     logger.info('Loading data placeholder...')
-    featurizer = FeaturizeMol(train_config.chem.atomic_numbers, train_config.chem.mol_bond_types,
-                            use_mask_node=train_config.transform.use_mask_node,
-                            use_mask_edge=train_config.transform.use_mask_edge,)
+    featurizer = FeaturizeMol(
+        train_config.chem.atomic_numbers, 
+        train_config.chem.mol_bond_types,
+        use_mask_node=train_config.transform.use_mask_node,
+        use_mask_edge=train_config.transform.use_mask_edge,
+    )
     max_size = None
     add_edge = getattr(config.sample, 'add_edge', None)
     
-    # # Model
+    # Model
     logger.info('Loading diffusion model...')
     if train_config.model.name == 'diffusion':
         model = MolDiff(
-                    config=train_config.model,
-                    num_node_types=featurizer.num_node_types,
-                    num_edge_types=featurizer.num_edge_types
-                ).to(args.device)
+            config=train_config.model,
+            num_node_types=featurizer.num_node_types,
+            num_edge_types=featurizer.num_edge_types
+        ).to(args.device)
     else:
         raise NotImplementedError
+    
     model.load_state_dict(ckpt['model'])
     model.eval()
+    logger.info("Model loaded successfully")
     
-    # # Bond predictor adn guidance
-    # if 'bond_predictor' in config:
-    #     logger.info('Building bond predictor...')
-    #     ckpt_bond = torch.load(config.bond_predictor, map_location=args.device)
-    #     bond_predictor = BondPredictor(ckpt_bond['config']['model'],
-    #             featurizer.num_node_types,
-    #             featurizer.num_edge_types-1 # note: bond_predictor not use edge mask
-    #     ).to(args.device)
-    #     bond_predictor.load_state_dict(ckpt_bond['model'])
-    #     bond_predictor.eval()
-    # else:
-    #     bond_predictor = None
-    # if 'guidance' in config.sample:
-    #     guidance = config.sample.guidance  # tuple: (guidance_type[entropy/uncertainty], guidance_scale)
-    # else:
-    #     guidance = None
     bond_predictor = None
     guidance = None
-
 
     pool = EasyDict({
         'failed': [],
         'finished': [],
     })
-    # # generating molecules
+
+    # Generating molecules
+    logger.info(f"Starting molecule generation (target: {config.sample.num_mols} molecules)")
     while len(pool.finished) < config.sample.num_mols:
-        if len(pool.failed) > 3 * (config.sample.num_mols):
-            logger.info('Too many failed molecules. Stop sampling.')
+        if len(pool.failed) > 3 * config.sample.num_mols:
+            logger.warning('Too many failed molecules. Stop sampling.')
             break
         
-        # prepare batch
         batch_size = args.batch_size if args.batch_size > 0 else config.sample.batch_size
         n_graphs = min(batch_size, (config.sample.num_mols - len(pool.finished))*2)
+        logger.debug(f"Generating batch of {n_graphs} molecules")
+        
         batch_holder = make_data_placeholder(n_graphs=n_graphs, device=args.device, max_size=max_size)
-        batch_node, halfedge_index, batch_halfedge = batch_holder['batch_node'], batch_holder['halfedge_index'], batch_holder['batch_halfedge']
-        
-        # inference
-        outputs = model.sample(
-            n_graphs=n_graphs,
-            batch_node=batch_node,
-            halfedge_index=halfedge_index,
-            batch_halfedge=batch_halfedge,
-            bond_predictor=bond_predictor,
-            guidance=guidance,
+        batch_node, halfedge_index, batch_halfedge = (
+            batch_holder['batch_node'], 
+            batch_holder['halfedge_index'], 
+            batch_holder['batch_halfedge']
         )
-        outputs = {key:[v.cpu().numpy() for v in value] for key, value in outputs.items()}
         
-        # decode outputs to molecules
-        batch_node, halfedge_index, batch_halfedge = batch_node.cpu().numpy(), halfedge_index.cpu().numpy(), batch_halfedge.cpu().numpy()
+        # Inference
+        try:
+            outputs = model.sample(
+                n_graphs=n_graphs,
+                batch_node=batch_node,
+                halfedge_index=halfedge_index,
+                batch_halfedge=batch_halfedge,
+                bond_predictor=bond_predictor,
+                guidance=guidance,
+            )
+            outputs = {key: [v.cpu().numpy() for v in value] for key, value in outputs.items()}
+        except Exception as e:
+            logger.error(f"Model sampling failed: {str(e)}")
+            continue
+        
+        # Decode outputs to molecules
+        batch_node = batch_node.cpu().numpy()
+        halfedge_index = halfedge_index.cpu().numpy()
+        batch_halfedge = batch_halfedge.cpu().numpy()
+        
         try:
             output_list = seperate_outputs(outputs, n_graphs, batch_node, halfedge_index, batch_halfedge)
-        except:
+        except Exception as e:
+            logger.warning(f"Output separation failed: {str(e)}")
             continue
+            
         gen_list = []
         for i_mol, output_mol in enumerate(output_list):
-            mol_info = featurizer.decode_output(
-                pred_node=output_mol['pred'][0],
-                pred_pos=output_mol['pred'][1],
-                pred_halfedge=output_mol['pred'][2],
-                halfedge_index=output_mol['halfedge_index'],
-            )  # note: traj is not used
             try:
+                mol_info = featurizer.decode_output(
+                    pred_node=output_mol['pred'][0],
+                    pred_pos=output_mol['pred'][1],
+                    pred_halfedge=output_mol['pred'][2],
+                    halfedge_index=output_mol['halfedge_index'],
+                )
                 rdmol = reconstruct_from_generated_with_edges(mol_info, add_edge=add_edge)
-            except MolReconsError:
-                pool.failed.append(mol_info)
-                logger.warning('Reconstruction error encountered.')
+                mol_info['rdmol'] = rdmol
+                smiles = Chem.MolToSmiles(rdmol)
+                mol_info['smiles'] = smiles
+                
+                if '.' in smiles:
+                    logger.warning(f'Incomplete molecule: {smiles}')
+                    pool.failed.append(mol_info)
+                else:
+                    logger.info(f'Success: {smiles}')
+                    if np.random.rand() < config.sample.save_traj_prob:
+                        mol_info['traj'] = [
+                            reconstruct_from_generated_with_edges(
+                                featurizer.decode_output(
+                                    output_mol['traj'][0][t],
+                                    output_mol['traj'][1][t],
+                                    output_mol['traj'][2][t],
+                                    output_mol['halfedge_index']
+                                ),
+                                False,
+                                add_edge=add_edge
+                            ) if t < len(output_mol['traj'][0]) else Chem.MolFromSmiles('O')
+                            for t in range(len(output_mol['traj'][0]))
+                        ]
+                    gen_list.append(mol_info)
+                    
+            except MolReconsError as e:
+                pool.failed.append(mol_info if 'mol_info' in locals() else {'error': str(e)})
+                logger.warning(f'Reconstruction error: {str(e)}')
                 continue
-            mol_info['rdmol'] = rdmol
-            smiles = Chem.MolToSmiles(rdmol)
-            mol_info['smiles'] = smiles
-            if '.' in smiles:
-                logger.warning('Incomplete molecule: %s' % smiles)
-                pool.failed.append(mol_info)
-            else:   # Pass checks!
-                logger.info('Success: %s' % smiles)
-                p_save_traj = np.random.rand()  # save traj
-                if p_save_traj <  config.sample.save_traj_prob:
-                    traj_info = [featurizer.decode_output(
-                        pred_node=output_mol['traj'][0][t],
-                        pred_pos=output_mol['traj'][1][t],
-                        pred_halfedge=output_mol['traj'][2][t],
-                        halfedge_index=output_mol['halfedge_index'],
-                    ) for t in range(len(output_mol['traj'][0]))]
-                    mol_traj = []
-                    for t in range(len(traj_info)):
-                        try:
-                            mol_traj.append(reconstruct_from_generated_with_edges(traj_info[t], False, add_edge=add_edge))
-                        except MolReconsError:
-                            mol_traj.append(Chem.MolFromSmiles('O'))
-                    mol_info['traj'] = mol_traj
-                gen_list.append(mol_info)
-                # pool.finished.append(mol_info)
+            except Exception as e:
+                pool.failed.append({'error': str(e)})
+                logger.error(f'Unexpected error: {str(e)}')
+                continue
 
-        # # Save sdf mols
-        sdf_dir = log_dir + '_SDF'
+        # Save results
+        sdf_dir = os.path.join(log_dir, 'SDF')
         os.makedirs(sdf_dir, exist_ok=True)
+        
         with open(os.path.join(log_dir, 'SMILES.txt'), 'a') as smiles_f:
-            for i, data_finished in enumerate(gen_list):
-                smiles_f.write(data_finished['smiles'] + '\n')
-                rdmol = data_finished['rdmol']
-                Chem.MolToMolFile(rdmol, os.path.join(sdf_dir, '%d.sdf' % (i+len(pool.finished))))
-
-                if 'traj' in data_finished:
-                    with Chem.SDWriter(os.path.join(sdf_dir, 'traj_%d.sdf' % (i+len(pool.finished)))) as w:
-                        for m in data_finished['traj']:
+            for i, data in enumerate(gen_list):
+                smiles_f.write(data['smiles'] + '\n')
+                Chem.MolToMolFile(data['rdmol'], os.path.join(sdf_dir, f'{i+len(pool.finished)}.sdf'))
+                
+                if 'traj' in data:
+                    with Chem.SDWriter(os.path.join(sdf_dir, f'traj_{i+len(pool.finished)}.sdf')) as w:
+                        for m in data['traj']:
                             try:
                                 w.write(m)
                             except:
                                 w.write(Chem.MolFromSmiles('O'))
+        
         pool.finished.extend(gen_list)
         print_pool_status(pool, logger)
 
+    # Save final results
     torch.save(pool, os.path.join(log_dir, 'samples_all.pt'))
-    
+    logger.info(f"Sampling completed. Results saved to {log_dir}")
+    logger.info(f"Successfully generated {len(pool.finished)} molecules")
+    logger.info(f"Failed attempts: {len(pool.failed)}")
