@@ -2,7 +2,8 @@ import os
 import sys
 import shutil
 import argparse
-sys.path.append('.')
+sys.path.append(os.path.abspath('../'))
+
 
 import torch
 import numpy as np
@@ -61,7 +62,18 @@ if __name__ == '__main__':
     
     # 处理Jupyter可能传入的额外参数
     args, _ = parser.parse_known_args()
+    
+    # 设置配置文件绝对路径
+    if not os.path.isabs(args.config):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(script_dir)
+        args.config = os.path.join(parent_dir, args.config)
 
+    # 设置输出目录到上一级目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(script_dir)
+    args.outdir = os.path.join(parent_dir, 'outputs')
+    
     # 首先初始化日志系统
     log_root = args.outdir.replace('outputs', 'outputs_vscode') if sys.argv[0].startswith('/data') else args.outdir
     log_dir = get_new_log_dir(log_root, prefix='sample')
@@ -77,9 +89,15 @@ if __name__ == '__main__':
     seed_all(seed)
     logger.info(f"Using random seed: {seed}")
     
-    # 安全加载检查点
-    logger.info(f"Loading checkpoint from {config.model.checkpoint}")
-    ckpt = safe_load_checkpoint(config.model.checkpoint, args.device, logger)
+    # 设置检查点文件绝对路径
+    checkpoint_path = config.model.checkpoint
+    if not os.path.isabs(checkpoint_path):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(script_dir)
+        checkpoint_path = os.path.join(parent_dir, checkpoint_path)
+    
+    logger.info(f"Loading checkpoint from {checkpoint_path}")
+    ckpt = safe_load_checkpoint(checkpoint_path, args.device, logger)
     train_config = ckpt['config']
 
     # 记录配置信息

@@ -3,7 +3,8 @@ import os
 import shutil
 import argparse
 import numpy as np
-sys.path.append('.')
+sys.path.append(os.path.abspath('../'))
+
 
 from tqdm import tqdm
 import torch

@@ -1,0 +1,6 @@
+rdkit
+lmdb
+numpy==1.24.4
+scipy
+pandas
+networkx

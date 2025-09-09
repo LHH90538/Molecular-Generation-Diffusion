@@ -4,7 +4,8 @@ import argparse
 import pandas as pd
 import pickle
 from tqdm.auto import tqdm
-sys.path.append('.')
+sys.path.append(os.path.abspath('../'))
+
 
 from utils.reconstruct import *
 from utils.misc import *
