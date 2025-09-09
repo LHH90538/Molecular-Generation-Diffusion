@@ -5,54 +5,48 @@
 
 ## 环境要求
 
-- Python 3.8+
-- PyTorch 2.5.1+
-- CUDA 12.4+
+- Python = 3.9 / 3.10 / 3.11
+- PyTorch 2.6.0
+- CUDA 12.4
 
-## 1. 环境配置
+## 1. 环境配置(以python3.9为例)
 
-### 创建python3.8虚拟环境
+### 创建python3.9虚拟环境
 ```
-conda create -n py38 python=3.8
+conda create -n py39 python=3.9
 ```
 ### 启动虚拟环境
 ```
-conda activate py38
+conda activate py39
 ```
 
-## 2. 安装依赖
 
-### 必要的安装python库
+### 安装PyTorch和基础依赖
+```
+pip install torch==2.6.0  --index-url https://download.pytorch.org/whl/cu124 
+```
 
 ```
 pip install -r requirements.txt
 ```
 
 ### 安装PyTorch Geometric相关包
-
-**注意**：请确保PyTorch Geometric的版本与您的PyTorch和CUDA版本匹配。如果不匹配，请修改上述命令中的版本号。此处使用pytorch2.5.1对应在AutoDL的RTX4090中可选配置
-
+#### 注意：请确保PyTorch Geometric的版本与您的PyTorch和CUDA版本匹配。如果不匹配，请修改上述命令中的版本号。此处使用`cuda 12.4`对应在AutoDL的RTX4090中可选配置
 ```
-pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.5.1+cu124.html
-```
-
-## 3. 使用模型
-
-### 训练模型(已自带权重文件，可以直接生成分子，也可自行重新训练)
-
-```
-python scripts/train_drug3d.py 
+pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.6.0+cu124.html
 ```
 
 ### 生成分子
 
 ```
+cd Molecular-Generation-Diffusion
 python scripts/sample_drug3d.py 
 ```
 
 ### 评估结果
 
 ```
+cd Molecular-Generation-Diffusion
 python scripts/evaluate_all.py 
 ```
 ## 配置说明

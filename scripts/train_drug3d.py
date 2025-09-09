@@ -3,8 +3,11 @@ import os
 import shutil
 import argparse
 import numpy as np
-sys.path.append(os.path.abspath('../'))
 
+# 添加项目根目录到Python路径
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.insert(0, parent_dir)
 
 from tqdm import tqdm
 import torch
