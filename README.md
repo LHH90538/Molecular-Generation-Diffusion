@@ -39,16 +39,10 @@ pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -
 ### 生成分子
 
 ```
-cd Molecular-Generation-Diffusion
 python scripts/sample_drug3d.py 
 ```
 
-### 评估结果
 
-```
-cd Molecular-Generation-Diffusion
-python scripts/evaluate_all.py 
-```
 ## 配置说明
 
 - `configs/train_MolDiff_simple.yml`: 训练配置
